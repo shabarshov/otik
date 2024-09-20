@@ -1,0 +1,4 @@
+00000000  xx xx xx xx 66 74 79 70  6d 70 34 32 xx xx xx xx  |....ftypmp42....|
+                      |  type   |  |sub type |
+
+Для mp4 type всегда такой, а sub type уже могут быть разными
