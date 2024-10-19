@@ -52,6 +52,7 @@ for (const [byte, freq] of Object.entries(byteFrequencies)) {
 
 // Выводим результаты
 console.log(`Длина файла в байтах: ${fileLength}`)
+console.log(`Длина файла в битах: ${fileLength * 8}`)
 console.log("Таблица характеристик символов по алфавиту:")
 for (const [byte, prob] of sortedByteProbabilities) {
     console.log(
