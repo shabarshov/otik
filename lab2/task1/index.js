@@ -39,6 +39,11 @@ const sortedByteProbabilitiesByFreq = Object.entries(byteProbabilities).sort(
     (a, b) => b[1] - a[1]
 )
 
+// Функция для преобразования байта в шестнадцатеричное представление
+function toHex(byte) {
+    return `0x${(byte & 0xff).toString(16).padStart(2, "0")}`
+}
+
 // Рассчитываем суммарное количество информации в файле
 let totalInformation = 0
 for (const [byte, freq] of Object.entries(byteFrequencies)) {
@@ -50,18 +55,22 @@ console.log(`Длина файла в байтах: ${fileLength}`)
 console.log("Таблица характеристик символов по алфавиту:")
 for (const [byte, prob] of sortedByteProbabilities) {
     console.log(
-        `Символ: ${byte}, Вероятность: ${prob.toFixed(
-            6
-        )}, Информация: ${byteInformation[byte].toFixed(6)}`
+        `Символ: ${toHex(byte)}, Вхождений: ${
+            byteFrequencies[byte]
+        }, Вероятность: ${prob.toFixed(6)}, Информация: ${byteInformation[
+            byte
+        ].toFixed(6)}`
     )
 }
 
 console.log("\nТаблица характеристик символов по убыванию частоты:")
 for (const [byte, prob] of sortedByteProbabilitiesByFreq) {
     console.log(
-        `Символ: ${byte}, Вероятность: ${prob.toFixed(
-            6
-        )}, Информация: ${byteInformation[byte].toFixed(6)}`
+        `Символ: ${toHex(byte)}, Вхождений: ${
+            byteFrequencies[byte]
+        }, Вероятность: ${prob.toFixed(6)}, Информация: ${byteInformation[
+            byte
+        ].toFixed(6)}`
     )
 }
 
