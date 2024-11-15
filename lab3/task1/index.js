@@ -1,5 +1,5 @@
-const fs = require("fs")
-const path = require("path")
+const fs = require("fs");
+const path = require("path");
 
 // Размеры полей в байтах
 const SIGNATURE_SIZE = 6;
@@ -76,21 +76,43 @@ class Archive {
     }
 }
 
-const filePath = path.resolve(__dirname, "file.txt")
-const fileContent = fs.readFileSync(filePath)
+// Основной скрипт
+const args = process.argv.slice(2);
 
-// Пример использования:
-const signature = "ALEXEY";  // Сигнатура формата
+if (args.length < 2) {
+    console.error("Использование: node script.js <encode|decode> <путь_к_файлу>");
+    process.exit(1);
+}
+
+const command = args[0];
+const filePath = args[1];
+const signature = "ALEXEY"; // Сигнатура формата
 const archive = new Archive(signature);
 
-const archiveBuffer = archive.encode(fileContent);
+if (command === "encode") {
+    try {
+        const fileContent = fs.readFileSync(filePath, "utf8");
+        const archiveBuffer = archive.encode(fileContent);
 
-console.log("Архив создан.", archiveBuffer);
+        const archivePath = filePath.replace(/\.txt$/, "") + ".otikAD";
+        fs.writeFileSync(archivePath, Buffer.from(archiveBuffer));
 
-// Декодирование:
-try {
-    const decodedData = archive.decode(archiveBuffer);
-    console.log("Файл восстановлен:",);
-} catch (error) {
-    console.error(error.message);
+        console.log(`Файл заархивирован в ${archivePath}`);
+    } catch (error) {
+        console.error("Ошибка при архивировании:", error.message);
+    }
+} else if (command === "decode") {
+    try {
+        const archiveBuffer = fs.readFileSync(filePath);
+        const decodedData = archive.decode(archiveBuffer.buffer);
+
+        const decodedFilePath = filePath.replace(/\.otikAD$/, ".decoded.txt");
+        fs.writeFileSync(decodedFilePath, decodedData);
+
+        console.log(`Файл восстановлен в ${decodedFilePath}`);
+    } catch (error) {
+        console.error("Ошибка при восстановлении:", error.message);
+    }
+} else {
+    console.error("Неизвестная команда. Используйте 'encode' или 'decode'.");
 }
