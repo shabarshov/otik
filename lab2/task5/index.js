@@ -1,54 +1,56 @@
 const fs = require("fs")
 const path = require("path")
 
-// Function to calculate count(aj ak) and count(aj *)
+// Функция для подсчета count(aj ak) и count(aj *)
 function calculateCounts(data) {
-    const counts = {} // For count(aj ak)
-    const singleCounts = {} // For count(aj *)
+    const counts = {} // Для count(aj ak)
+    const singleCounts = {} // Для count(aj *)
 
-    // Loop through the file content
+    // Перебор всех символов в строке
     for (let i = 0; i < data.length - 1; i++) {
-        const aj = data[i]
-        const ak = data[i + 1]
+        const aj = data.charAt(i) // Получаем символ Unicode
+        const ak = data.charAt(i + 1) // Следующий символ Unicode
 
-        // Update counts for aj ak (pair of consecutive characters)
+        // Обновляем count для aj ak (пара последовательных символов)
         const pair = aj + ak
         counts[pair] = (counts[pair] || 0) + 1
 
-        // Update singleCounts for aj
+        // Обновляем count для aj (одиночные символы)
         singleCounts[aj] = (singleCounts[aj] || 0) + 1
     }
 
-    // Handle the last symbol in singleCounts
-    const lastSymbol = data[data.length - 1]
+    // Обрабатываем последний символ
+    const lastSymbol = data.charAt(data.length - 1)
     singleCounts[lastSymbol] = (singleCounts[lastSymbol] || 0) + 1
 
     return { counts, singleCounts }
 }
 
-// Function to calculate conditional probabilities
+// Функция для подсчета условных вероятностей
 function calculateProbabilities(counts, singleCounts) {
     const probabilities = {}
 
-    // Calculate the conditional probability P(ak | aj) for each pair
+    // Вычисляем условную вероятность P(ak | aj) для каждой пары
     for (const pair in counts) {
-        const aj = pair[0] // First character of the pair
+        const aj = pair[0] // Первый символ пары
         probabilities[pair] = counts[pair] / singleCounts[aj]
     }
 
     return probabilities
 }
 
-// Updated function to calculate I_CM1(Q)
+// Обновленная функция для вычисления I_CM1(Q)
 function calculateInformation(probabilities, counts, singleCounts, dataLength) {
     let totalInformation = 0
     const uniformProbability = 1 / 256
 
+    // Рассчитываем информацию для одиночных символов
     for (const symbol in singleCounts) {
         const symbolProbability = singleCounts[symbol] / dataLength
         totalInformation += -symbolProbability * Math.log2(uniformProbability)
     }
 
+    // Рассчитываем информацию для пар символов
     for (const pair in probabilities) {
         const probability = probabilities[pair]
         totalInformation += counts[pair] * -Math.log2(probability)
@@ -60,22 +62,22 @@ function calculateInformation(probabilities, counts, singleCounts, dataLength) {
     }
 }
 
-// Main function
+// Основная функция
 function main(filePath) {
-    // Read file
+    // Чтение файла
     let data = fs.readFileSync(filePath, "utf-8")
 
-    // Remove newlines and whitespace
+    // Убираем пробелы и новые строки
     data = data.replace(/\s+/g, "")
     console.log("File content:", data)
 
-    // Calculate counts
+    // Подсчитываем количество
     const { counts, singleCounts } = calculateCounts(data)
 
-    // Calculate probabilities
+    // Подсчитываем вероятности
     const probabilities = calculateProbabilities(counts, singleCounts)
 
-    // Calculate information
+    // Подсчитываем информацию
     const information = calculateInformation(
         probabilities,
         counts,
@@ -92,7 +94,7 @@ function main(filePath) {
     console.log("-------------------------")
 }
 
-// Run the program for all files
+// Запуск программы для всех файлов
 const files = [
     "../files/a.txt",
     "../files/aabacad.txt",
@@ -100,6 +102,7 @@ const files = [
     "../files/abab.txt",
     "../files/abcd.txt",
     "../files/abac.txt",
+    "../files/task5_unicode.txt",
 ]
 
 files.forEach((file) => {
