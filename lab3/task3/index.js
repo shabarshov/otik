@@ -1,118 +1,149 @@
-class ArchiveLZ2 {
-  constructor(signature = "LZ2ARC") {
-      this.signature = signature;
-      this.version = { major: 1, minor: 0 };  // Версия 1.0
-  }
+const fs = require("fs");
+const path = require("path");
 
-  // Метод для кодирования данных в архив
-  encode(fileData, compressionCtx = 0, compressionNoCtx = 0, errorProtection = 0, auxiliaryData = []) {
-      const encoder = new TextEncoder();
-      const rawData = encoder.encode(fileData);  // Преобразуем строку в байты
+// Размеры полей в байтах
+const SIGNATURE_SIZE = 6;
+const VERSION_SIZE = 2;
+const COMPRESSION_CODE_SIZE = 1;
+const ERROR_PROTECTION_CODE_SIZE = 1;
+const FILE_LENGTH_SIZE = 8;
 
-      const fileLength = rawData.length;  // Длина исходного файла в байтах
-      const serviceDataSize = auxiliaryData.length;  // Длина служебных данных
+class Archive {
+    constructor(signature) {
+        this.signature = signature;
+        this.versionMajor = 1;
+        this.versionMinor = 0;
+        this.compressionCode = 0; // 0 — отсутствие сжатия
+        this.errorProtectionCode = 0; // 0 — отсутствие защиты от помех
+    }
 
-      // Создаем буфер для архива, размером 6 (сигнатура) + 2 (версия) + 1 + 1 + 1 (алгоритмы) + 8 (длина файла) + 2 (размер служебных данных) + сырые данные
-      const archiveBuffer = new ArrayBuffer(6 + 2 + 1 + 1 + 1 + 8 + 2 + serviceDataSize + rawData.length);
-      const view = new DataView(archiveBuffer);
+    encode(fileData) {
+        const encoder = new TextEncoder();
+        const rawData = encoder.encode(fileData);
 
-      // Сигнатура
-      for (let i = 0; i < 6; i++) {
-          view.setUint8(i, this.signature.charCodeAt(i) || 0);
-      }
+        // Считаем длину исходного файла
+        const fileLength = rawData.length;
 
-      // Версия формата (мажорная и минорная часть)
-      view.setUint8(6, this.version.major);
-      view.setUint8(7, this.version.minor);
+        // Создаем архив с обновленной структурой
+        const archiveBuffer = new ArrayBuffer(
+            SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE + ERROR_PROTECTION_CODE_SIZE + FILE_LENGTH_SIZE + fileLength
+        );
+        const view = new DataView(archiveBuffer);
 
-      // Алгоритмы сжатия и защиты
-      view.setUint8(8, compressionCtx);     // Сжатие с учётом контекста
-      view.setUint8(9, compressionNoCtx);   // Сжатие без учёта контекста
-      view.setUint8(10, errorProtection);   // Алгоритм защиты от помех
+        // Записываем сигнатуру
+        for (let i = 0; i < SIGNATURE_SIZE; i++) {
+            view.setUint8(i, this.signature.charCodeAt(i) || 0);
+        }
 
-      // Длина исходного файла
-      view.setBigUint64(11, BigInt(fileLength));
+        // Записываем версию формата (основная и минорная версии)
+        view.setUint8(SIGNATURE_SIZE, this.versionMajor);
+        view.setUint8(SIGNATURE_SIZE + 1, this.versionMinor);
 
-      // Размер служебных данных
-      view.setUint16(19, serviceDataSize);
+        // Записываем код алгоритма сжатия
+        view.setUint8(SIGNATURE_SIZE + VERSION_SIZE, this.compressionCode);
 
-      // Служебные данные
-      for (let i = 0; i < serviceDataSize; i++) {
-          view.setUint8(21 + i, auxiliaryData[i]);
-      }
+        // Записываем код защиты от помех
+        view.setUint8(SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE, this.errorProtectionCode);
 
-      // Закодированные данные (сырые данные файла)
-      for (let i = 0; i < rawData.length; i++) {
-          view.setUint8(21 + serviceDataSize + i, rawData[i]);
-      }
+        // Записываем длину файла
+        view.setBigUint64(SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE + ERROR_PROTECTION_CODE_SIZE, BigInt(fileLength));
 
-      return archiveBuffer;  // Возвращаем архив в виде буфера
-  }
+        // Записываем данные исходного файла
+        for (let i = 0; i < fileLength; i++) {
+            view.setUint8(
+                SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE + ERROR_PROTECTION_CODE_SIZE + FILE_LENGTH_SIZE + i,
+                rawData[i]
+            );
+        }
 
-  // Метод для декодирования архива
-  decode(archiveBuffer) {
-      const view = new DataView(archiveBuffer);
+        return archiveBuffer;
+    }
 
-      // Проверка сигнатуры
-      let signature = '';
-      for (let i = 0; i < 6; i++) {
-          signature += String.fromCharCode(view.getUint8(i));
-      }
+    decode(archiveBuffer) {
+        const view = new DataView(archiveBuffer);
 
-      if (signature !== this.signature) {
-          throw new Error("Неверная сигнатура архива");
-      }
+        // Читаем сигнатуру
+        let signature = '';
+        for (let i = 0; i < SIGNATURE_SIZE; i++) {
+            signature += String.fromCharCode(view.getUint8(i));
+        }
 
-      // Чтение версии формата
-      const majorVersion = view.getUint8(6);
-      const minorVersion = view.getUint8(7);
-      console.log(`Версия архива: ${majorVersion}.${minorVersion}`);
+        // Проверяем сигнатуру
+        if (signature !== this.signature) {
+            throw new Error('Неверная сигнатура архива');
+        }
 
-      // Чтение кодов алгоритмов
-      const compressionCtx = view.getUint8(8);
-      const compressionNoCtx = view.getUint8(9);
-      const errorProtection = view.getUint8(10);
-      console.log(`Сжатие с учётом контекста: ${compressionCtx}, без учёта контекста: ${compressionNoCtx}, защита от помех: ${errorProtection}`);
+        // Читаем версии формата
+        const versionMajor = view.getUint8(SIGNATURE_SIZE);
+        const versionMinor = view.getUint8(SIGNATURE_SIZE + 1);
 
-      // Исходная длина файла
-      const fileLength = Number(view.getBigUint64(11));
+        // Проверяем версию формата
+        if (versionMajor !== this.versionMajor || versionMinor !== this.versionMinor) {
+            throw new Error('Неверная версия архива');
+        }
 
-      // Размер служебных данных
-      const serviceDataSize = view.getUint16(19);
+        // Читаем код сжатия и защиты от помех
+        const compressionCode = view.getUint8(SIGNATURE_SIZE + VERSION_SIZE);
+        const errorProtectionCode = view.getUint8(SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE);
 
-      // Чтение служебных данных (если есть)
-      const serviceData = new Uint8Array(serviceDataSize);
-      for (let i = 0; i < serviceDataSize; i++) {
-          serviceData[i] = view.getUint8(21 + i);
-      }
-      console.log(`Служебные данные:`, serviceData);
+        // Проверяем коды сжатия и защиты от помех
+        if (compressionCode !== this.compressionCode || errorProtectionCode !== this.errorProtectionCode) {
+            throw new Error('Неподдерживаемый алгоритм сжатия или защиты от помех');
+        }
 
-      // Чтение закодированных данных (оригинальных данных файла)
-      const rawData = new Uint8Array(fileLength);
-      for (let i = 0; i < fileLength; i++) {
-          rawData[i] = view.getUint8(21 + serviceDataSize + i);
-      }
+        // Читаем длину файла
+        const fileLength = Number(view.getBigUint64(SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE + ERROR_PROTECTION_CODE_SIZE));
 
-      // Декодирование байтов обратно в строку
-      const decoder = new TextDecoder();
-      return decoder.decode(rawData);
-  }
+        // Читаем данные файла
+        const rawData = new Uint8Array(fileLength);
+        for (let i = 0; i < fileLength; i++) {
+            rawData[i] = view.getUint8(
+                SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE + ERROR_PROTECTION_CODE_SIZE + FILE_LENGTH_SIZE + i
+            );
+        }
+
+        const decoder = new TextDecoder();
+        return decoder.decode(rawData);
+    }
 }
 
-// Пример использования:
-const archive = new ArchiveLZ2();
+// Основной скрипт
+const args = process.argv.slice(2);
 
-const fileData = "Пример текста для архивации.";  // Данные для архивации
-const auxiliaryData = [1, 2, 3, 4, 5];  // Пример служебных данных (массив частот или другие параметры)
+if (args.length < 2) {
+    console.error("Использование: node script.js <encode|decode> <путь_к_файлу>");
+    process.exit(1);
+}
 
-// Кодирование данных в архив
-const archiveBuffer = archive.encode(fileData, 1, 0, 0, auxiliaryData);  // Сжатие с учётом контекста (1), без учёта контекста (0), защита (0)
-console.log("Архив создан.", archiveBuffer);
+const command = args[0];
+const filePath = args[1];
+const signature = "ALEXEY";
+const archive = new Archive(signature);
 
-// Декодирование данных из архива
-try {
-  const decodedData = archive.decode(archiveBuffer);
-  console.log("Файл восстановлен:", decodedData);
-} catch (error) {
-  console.error(error.message);
+if (command === "encode") {
+    try {
+        const fileContent = fs.readFileSync(filePath, "utf8");
+        const archiveBuffer = archive.encode(fileContent);
+
+        const archivePath = filePath.replace(/\.txt$/, "") + ".otikAD";
+        fs.writeFileSync(archivePath, Buffer.from(archiveBuffer));
+
+        console.log(`Файл заархивирован в ${archivePath}`);
+    } catch (error) {
+        console.error("Ошибка при архивировании:", error.message);
+    }
+} else if (command === "decode") {
+    try {
+        const archiveBuffer = fs.readFileSync(filePath);
+        const decodedData = archive.decode(archiveBuffer.buffer);
+
+        const decodedFilePath = filePath.replace(/\.otikAD$/, ".decoded.txt");
+        fs.writeFileSync(decodedFilePath, decodedData);
+
+        console.log(`Файл восстановлен в ${decodedFilePath}`);
+    } catch (error) {
+        console.error("Ошибка при восстановлении:", error.message);
+    }
+} else {
+    console.error("Неизвестная команда. Используйте 'encode' или 'decode'.");
 }
