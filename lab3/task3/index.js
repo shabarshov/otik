@@ -1,149 +1,135 @@
 const fs = require("fs");
 const path = require("path");
 
-// Размеры полей в байтах
-const SIGNATURE_SIZE = 6;
-const VERSION_SIZE = 2;
-const COMPRESSION_CODE_SIZE = 1;
-const ERROR_PROTECTION_CODE_SIZE = 1;
-const FILE_LENGTH_SIZE = 8;
-
-class Archive {
+class MultiFileArchive {
     constructor(signature) {
         this.signature = signature;
-        this.versionMajor = 1;
-        this.versionMinor = 0;
-        this.compressionCode = 0; // 0 — отсутствие сжатия
-        this.errorProtectionCode = 0; // 0 — отсутствие защиты от помех
+        this.versionMajor = 1;         // Основная версия формата
+        this.versionMinor = 0;         // Минорная версия формата
+        this.compressionCode = 0;      // Код алгоритма сжатия (0 — без сжатия)
+        this.errorProtectionCode = 0;  // Код защиты от помех (0 — без защиты)
     }
 
-    encode(fileData) {
-        const encoder = new TextEncoder();
-        const rawData = encoder.encode(fileData);
+    encode(filePaths, outputArchivePath) {
+        let headerSize = 6 + 2 + 1 + 1 + 4;
+        const fileDataBuffers = [];
 
-        // Считаем длину исходного файла
-        const fileLength = rawData.length;
+        filePaths.forEach(filePath => {
+            const relativePath = path.relative(process.cwd(), filePath);
+            const fileContent = fs.readFileSync(filePath);
 
-        // Создаем архив с обновленной структурой
-        const archiveBuffer = new ArrayBuffer(
-            SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE + ERROR_PROTECTION_CODE_SIZE + FILE_LENGTH_SIZE + fileLength
-        );
-        const view = new DataView(archiveBuffer);
+            const pathBuffer = Buffer.from(relativePath, 'utf-8');
+            const dataBuffer = Buffer.from(fileContent);
 
-        // Записываем сигнатуру
-        for (let i = 0; i < SIGNATURE_SIZE; i++) {
-            view.setUint8(i, this.signature.charCodeAt(i) || 0);
-        }
+            headerSize += 2 + pathBuffer.length + 8;
+            fileDataBuffers.push({ pathBuffer, dataBuffer });
+        });
 
-        // Записываем версию формата (основная и минорная версии)
-        view.setUint8(SIGNATURE_SIZE, this.versionMajor);
-        view.setUint8(SIGNATURE_SIZE + 1, this.versionMinor);
+        const archiveBuffer = Buffer.alloc(headerSize + fileDataBuffers.reduce((sum, f) => sum + f.dataBuffer.length, 0));
 
-        // Записываем код алгоритма сжатия
-        view.setUint8(SIGNATURE_SIZE + VERSION_SIZE, this.compressionCode);
+        let offset = 0;
+        archiveBuffer.write(this.signature, offset, 6, 'utf-8');
+        offset += 6;
 
-        // Записываем код защиты от помех
-        view.setUint8(SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE, this.errorProtectionCode);
+        archiveBuffer.writeUInt8(this.versionMajor, offset++);
+        archiveBuffer.writeUInt8(this.versionMinor, offset++);
 
-        // Записываем длину файла
-        view.setBigUint64(SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE + ERROR_PROTECTION_CODE_SIZE, BigInt(fileLength));
+        archiveBuffer.writeUInt8(this.compressionCode, offset++);
+        archiveBuffer.writeUInt8(this.errorProtectionCode, offset++);
 
-        // Записываем данные исходного файла
-        for (let i = 0; i < fileLength; i++) {
-            view.setUint8(
-                SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE + ERROR_PROTECTION_CODE_SIZE + FILE_LENGTH_SIZE + i,
-                rawData[i]
-            );
-        }
+        archiveBuffer.writeUInt32BE(fileDataBuffers.length, offset);
+        offset += 4;
 
-        return archiveBuffer;
+        fileDataBuffers.forEach(file => {
+            archiveBuffer.writeUInt16BE(file.pathBuffer.length, offset);
+            offset += 2;
+            file.pathBuffer.copy(archiveBuffer, offset);
+            offset += file.pathBuffer.length;
+
+            archiveBuffer.writeBigUInt64BE(BigInt(file.dataBuffer.length), offset);
+            offset += 8;
+
+            file.dataBuffer.copy(archiveBuffer, offset);
+            offset += file.dataBuffer.length;
+        });
+
+        fs.writeFileSync(outputArchivePath, archiveBuffer);
+        console.log(`Архив создан: ${outputArchivePath}`);
     }
 
-    decode(archiveBuffer) {
-        const view = new DataView(archiveBuffer);
+    decode(archivePath) {
+        const archiveBuffer = fs.readFileSync(archivePath);
+        let offset = 0;
 
-        // Читаем сигнатуру
-        let signature = '';
-        for (let i = 0; i < SIGNATURE_SIZE; i++) {
-            signature += String.fromCharCode(view.getUint8(i));
-        }
-
-        // Проверяем сигнатуру
+        const signature = archiveBuffer.slice(offset, offset + 6).toString('utf-8');
+        offset += 6;
         if (signature !== this.signature) {
             throw new Error('Неверная сигнатура архива');
         }
 
-        // Читаем версии формата
-        const versionMajor = view.getUint8(SIGNATURE_SIZE);
-        const versionMinor = view.getUint8(SIGNATURE_SIZE + 1);
+        const versionMajor = archiveBuffer.readUInt8(offset++);
+        const versionMinor = archiveBuffer.readUInt8(offset++);
 
-        // Проверяем версию формата
-        if (versionMajor !== this.versionMajor || versionMinor !== this.versionMinor) {
-            throw new Error('Неверная версия архива');
+        const compressionCode = archiveBuffer.readUInt8(offset++);
+        const errorProtectionCode = archiveBuffer.readUInt8(offset++);
+
+        const fileCount = archiveBuffer.readUInt32BE(offset);
+        offset += 4;
+
+        const files = [];
+
+        for (let i = 0; i < fileCount; i++) {
+            const pathLength = archiveBuffer.readUInt16BE(offset);
+            offset += 2;
+            const filePath = archiveBuffer.slice(offset, offset + pathLength).toString('utf-8');
+            offset += pathLength;
+
+            const dataLength = Number(archiveBuffer.readBigUInt64BE(offset));
+            offset += 8;
+
+            const fileData = archiveBuffer.slice(offset, offset + dataLength);
+            offset += dataLength;
+
+            const fullPath = path.resolve(filePath);
+            fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+            fs.writeFileSync(fullPath, fileData);
+
+            files.push({ path: fullPath, data: fileData });
         }
 
-        // Читаем код сжатия и защиты от помех
-        const compressionCode = view.getUint8(SIGNATURE_SIZE + VERSION_SIZE);
-        const errorProtectionCode = view.getUint8(SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE);
-
-        // Проверяем коды сжатия и защиты от помех
-        if (compressionCode !== this.compressionCode || errorProtectionCode !== this.errorProtectionCode) {
-            throw new Error('Неподдерживаемый алгоритм сжатия или защиты от помех');
-        }
-
-        // Читаем длину файла
-        const fileLength = Number(view.getBigUint64(SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE + ERROR_PROTECTION_CODE_SIZE));
-
-        // Читаем данные файла
-        const rawData = new Uint8Array(fileLength);
-        for (let i = 0; i < fileLength; i++) {
-            rawData[i] = view.getUint8(
-                SIGNATURE_SIZE + VERSION_SIZE + COMPRESSION_CODE_SIZE + ERROR_PROTECTION_CODE_SIZE + FILE_LENGTH_SIZE + i
-            );
-        }
-
-        const decoder = new TextDecoder();
-        return decoder.decode(rawData);
+        console.log("Файлы успешно извлечены:", files.map(f => f.path));
     }
 }
 
-// Основной скрипт
+// Обработка параметров командной строки
 const args = process.argv.slice(2);
+const archive = new MultiFileArchive("ALEXEY");
 
-if (args.length < 2) {
-    console.error("Использование: node script.js <encode|decode> <путь_к_файлу>");
-    process.exit(1);
-}
+if (args[0] === "encode") {
+    // Команда для создания архива
+    const outputArchivePath = args[1];    // Путь к архиву, например "archive.otikAD"
+    const filePaths = args.slice(2);      // Список файлов для архивации
 
-const command = args[0];
-const filePath = args[1];
-const signature = "ALEXEY";
-const archive = new Archive(signature);
-
-if (command === "encode") {
-    try {
-        const fileContent = fs.readFileSync(filePath, "utf8");
-        const archiveBuffer = archive.encode(fileContent);
-
-        const archivePath = filePath.replace(/\.txt$/, "") + ".otikAD";
-        fs.writeFileSync(archivePath, Buffer.from(archiveBuffer));
-
-        console.log(`Файл заархивирован в ${archivePath}`);
-    } catch (error) {
-        console.error("Ошибка при архивировании:", error.message);
+    if (!outputArchivePath || filePaths.length === 0) {
+        console.error("Использование: node archiveScript.js encode <путь_к_архиву> <список_файлов>");
+        process.exit(1);
     }
-} else if (command === "decode") {
-    try {
-        const archiveBuffer = fs.readFileSync(filePath);
-        const decodedData = archive.decode(archiveBuffer.buffer);
 
-        const decodedFilePath = filePath.replace(/\.otikAD$/, ".decoded.txt");
-        fs.writeFileSync(decodedFilePath, decodedData);
+    archive.encode(filePaths, outputArchivePath);
 
-        console.log(`Файл восстановлен в ${decodedFilePath}`);
-    } catch (error) {
-        console.error("Ошибка при восстановлении:", error.message);
+} else if (args[0] === "decode") {
+    // Команда для извлечения архива
+    const archivePath = args[1];  // Путь к архиву, например "archive.otikAD"
+
+    if (!archivePath) {
+        console.error("Использование: node archiveScript.js decode <путь_к_архиву>");
+        process.exit(1);
     }
+
+    archive.decode(archivePath);
+
 } else {
-    console.error("Неизвестная команда. Используйте 'encode' или 'decode'.");
+    console.error("Неизвестная команда. Использование: ");
+    console.error("  Создать архив: node archiveScript.js encode <путь_к_архиву> <список_файлов>");
+    console.error("  Извлечь архив: node archiveScript.js decode <путь_к_архиву>");
 }
